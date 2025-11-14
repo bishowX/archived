@@ -2,6 +2,7 @@ package html_parser
 
 import (
 	"bufio"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
@@ -24,7 +25,7 @@ type Token struct {
 type State int
 
 const (
-	Data = iota
+	Data State = iota
 	TagOpen
 	TagName
 	AttrName
@@ -81,8 +82,9 @@ func Tokenize(rd io.Reader) {
 			if r == '/' {
 				logger.Debug("End tag open")
 				state = EndTagOpen
-			}
-			if r == 'a' {
+			} else if r == ' ' {
+				state = AttrName
+			} else {
 				buff += string(r)
 				state = TagName
 			}
@@ -107,20 +109,40 @@ func Tokenize(rd io.Reader) {
 				buff += string(r)
 			}
 		case AttrName:
-			if r == '=' {
+			switch r {
+			case '=':
 				logger.Debug("Attribute value started", "name", buff)
 				currentAttrName = buff
 				state = AttrValue
 				buff = ""
-			} else {
+			case '>':
+				currentAttrName = buff
+				token.Attrs[currentAttrName] = ""
+				buff = ""
+				currentAttrName = ""
+				state = Data
+			case ' ':
+				if buff != "" {
+					currentAttrName = buff
+					token.Attrs[currentAttrName] = ""
+					buff = ""
+					currentAttrName = ""
+				}
+			default:
 				buff += string(r)
 			}
 		case AttrValue:
 			switch r {
 			case ' ':
-				logger.Debug("Found space after attr value")
+				// if quote is not closed yet
+				if quoteChar != 0 {
+					buff += string(r)
+				} else {
+					logger.Debug("going to state AttrName", "buff", buff)
+					state = AttrName
+				}
 			case quoteChar:
-				logger.Debug("Quote closed")
+				logger.Debug("Quote closed", "name", buff)
 				token.Attrs[currentAttrName] = buff
 				currentAttrName = ""
 				buff = ""
@@ -141,5 +163,8 @@ func Tokenize(rd io.Reader) {
 }
 
 func printToken(token Token, tagType TagType) {
-	slog.Info("Token", "type", token.Type, "tagType", tagType, "tag", token.Tag, "attributes", token.Attrs)
+	slog.Info("Token", "type", token.Type, "tagType", tagType, "tag", token.Tag, "attributes", func() string {
+		b, _ := json.Marshal(token.Attrs)
+		return string(b)
+	}())
 }
